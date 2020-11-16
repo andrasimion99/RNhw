@@ -5,8 +5,10 @@ import random
 
 
 class Network:
-    def __init__(self, training_data, learning_rate, iterations, mini_batch_size, layer_sizes):
-        self.training_data = training_data
+    def __init__(self, images, labels, learning_rate, iterations, mini_batch_size, layer_sizes):
+        # self.training_data = training_data
+        self.images = images
+        self.labels = labels
         self.learning_rate = learning_rate
         self.iterations = iterations
         self.mini_batch_size = mini_batch_size
@@ -14,119 +16,124 @@ class Network:
         self.layer_sizes = layer_sizes
         self.weights = self.weights_initialisation()
         self.biases = self.bias_initialisation()
+        self.digit_array = self.digit_array_initialisation()
 
     def weights_initialisation(self):
-        return {'2': np.random.rand(self.layer_sizes[0], self.layer_sizes[1]),
-                '3': np.random.rand(self.layer_sizes[1], self.layer_sizes[2])}
+        return {'2': np.random.normal(size=(self.layer_sizes[0], self.layer_sizes[1]), loc=0.0,
+                                      scale=1.0 / self.layer_sizes[0]),
+                '3': np.random.normal(size=(self.layer_sizes[1], self.layer_sizes[2]), loc=0.0,
+                                      scale=1.0 / self.layer_sizes[1])}
 
     def bias_initialisation(self):
-        return {'2': np.zeros(self.layer_sizes[1]),
-                '3': np.zeros(self.layer_sizes[2])}
+        return {'2': np.random.normal(size=self.layer_sizes[1], scale=1.0, loc=0.0),
+                '3': np.random.normal(size=self.layer_sizes[2], scale=1.0, loc=0.0)}
+
+    def digit_array_initialisation(self):
+        digit_labels = np.zeros([len(self.images), 10])
+        for digit in range(10):
+            digit_labels[:, digit] = self.digit_label_initialisation(digit)
+        print(digit_labels)
+        return digit_labels
+
+    def digit_label_initialisation(self, digit):
+        return (self.labels == digit) * 1
+
+    def get_mini_data(self, i, index_list):
+        # mini_samples = self.images[(i - 1) * self.mini_batch_size:i * self.mini_batch_size]
+        # print(len(index_list))
+        mini_samples = [self.images[index_list[k]] for k in
+                        range((i - 1) * self.mini_batch_size, i * self.mini_batch_size)]
+        # mini_labels = self.digit_array[(i - 1) * self.mini_batch_size:i * self.mini_batch_size]
+        mini_labels = [self.digit_array[index_list[k]] for k in
+                       range((i - 1) * self.mini_batch_size, i * self.mini_batch_size)]
+
+        return np.array(mini_samples), np.array(mini_labels)
 
     def train(self):
         index = 0
-        n = len(self.training_data)
+        n = len(self.images)
+        index_list = [*range(n)]
         while self.iterations > index:
             print(f"Iteratii ramase: {self.iterations - index}")
-            random.shuffle(self.training_data)
-            mini_batches = [training_data[k:k + self.mini_batch_size] for k in range(0, n, self.mini_batch_size)]
-            for mini_batch in mini_batches:
-                self.compute_mini_batch(mini_batch)
-                # print("eroare:", self.cross_entropy(mini_batch))
+            random.shuffle(index_list)
+            nr_mini_batches = n // self.mini_batch_size
+            lr = self.learning_rate / self.mini_batch_size
 
-            print("eroare:", self.cross_entropy(self.training_data))
-            print("acuratete: ", self.accuracy(self.training_data), "%")
-
+            for i in range(1, nr_mini_batches + 1):
+                mini_samples, mini_labels = self.get_mini_data(i, index_list)
+                # print(mini_labels)
+                # print(list(mini_samples[0]))
+                # print(list(mini_samples[1]))
+                gradient_weights, gradient_bias = self.backpropagation(mini_samples, mini_labels)
+                self.weights['2'] -= lr * gradient_weights[0]
+                self.weights['3'] -= lr * gradient_weights[1]
+                self.biases['2'] -= self.learning_rate * gradient_bias[0]
+                self.biases['3'] -= self.learning_rate * gradient_bias[1]
+            print("eroare: ", self.cross_entropy())
+            print("accuracy:", self.accuracy(self.images, self.labels))
             index += 1
 
-    def compute_mini_batch(self, mini_batch):
-        # gradient_bias = [np.zeros(b.shape) for b in self.biases.values()]
-        gradient_weights = [np.zeros_like(self.weights['2']), np.zeros_like(self.weights['3'])]
-        gradient_bias = [np.zeros_like(self.biases['2']), np.zeros_like(self.biases['3'])]
-        for sample, label in mini_batch:
-            partial_derivative_weights, partial_derivative_bias = self.backpropagation(sample, label)
-            gradient_weights += partial_derivative_weights
-            gradient_bias += partial_derivative_bias
-            # gradient_weights = [gw + nw for gw, nw in zip(gradient_weights, nabla_weights)]
-            # gradient_bias = [gb + nb for gb, nb in zip(gradient_bias, nabla_biases)]
-        # print(np.shape(gradient_weights[0]))
-        # self.weights['2'] -= self.learning_rate * gradient_weights[0]
-        # self.weights['3'] -= self.learning_rate * gradient_weights[1]
-        # self.biases['2'] -= self.learning_rate * gradient_bias[0]
-        # self.biases['3'] -= self.learning_rate * gradient_bias[1]
-        self.weights['2'] = self.weights['2'] - self.learning_rate / len(mini_batch) * gradient_weights[0]
-        self.weights['3'] = self.weights['3'] - self.learning_rate / len(mini_batch) * gradient_weights[1]
-        self.biases['2'] = self.biases['2'] - self.learning_rate / len(mini_batch) * gradient_bias[0]
-        self.biases['3'] = self.biases['3'] - self.learning_rate / len(mini_batch) * gradient_bias[1]
-
-    def backpropagation(self, sample, label):
+    def backpropagation(self, samples, labels):
         partial_derivative_weights = [np.zeros_like(self.weights['2']), np.zeros_like(self.weights['3'])]
         partial_derivative_bias = [np.zeros_like(self.biases['2']), np.zeros_like(self.biases['3'])]
         delta_error = [np.zeros_like(self.biases['2']), np.zeros_like(self.biases['3'])]
-        # print(type(delta_error))
-        # net_input_layers = []
-        sigmoid_layers = [sample]
-        x = sample
-        for w, b in zip(self.weights.values(), self.biases.values()):
-            z = np.dot(w.T, x) + b
-            # net_input_layers.append(z)
-            x = self.sigmoid(z)
-            sigmoid_layers.append(x)
-        # # compute the error for the final layer
+        sigmoid_layers = [samples]
+        x = samples
+        for l in self.weights:
+            z = np.dot(x, self.weights[l]) + self.biases[l]
+            if l == '2':
+                x = self.sigmoid(z)
+            if l == '3':
+                x = self.softmax(z, 1)
+            sigmoid_layers.append(np.copy(x))
+
         layer = 1
-        # delta_error[layer] = self.sigmoid_derivative(sigmoid_layers[layer + 1]) * error[layer]
-        delta_error[layer] = sigmoid_layers[layer + 1] - label
-        sigmoid = sigmoid_layers[layer].reshape(sigmoid_layers[layer].shape[0], 1)
-        delta = delta_error[layer].reshape(1, delta_error[layer].shape[0])
-        partial_derivative_weights[layer] = np.dot(sigmoid, delta)
-        partial_derivative_bias[layer] = delta_error[layer]
+        delta_error[layer] = sigmoid_layers[layer + 1] - labels
+
+        partial_derivative_weights[layer] = np.dot(sigmoid_layers[layer].T, delta_error[layer])
+        partial_derivative_bias[layer] = np.mean(delta_error[layer], axis=0)
 
         layer = 0
-        delta_error[layer] = self.sigmoid_derivative(sigmoid_layers[layer + 1]) * np.dot(self.weights['3'],
-                                                                                         delta_error[layer + 1])
-        sigmoid = sigmoid_layers[layer].reshape(sigmoid_layers[layer].shape[0], 1)
-        delta = delta_error[layer].reshape(1, delta_error[layer].shape[0])
-        partial_derivative_weights[layer] = np.dot(sigmoid, delta)
-        partial_derivative_bias[layer] = delta_error[layer]
+        delta_error[layer] = self.sigmoid_derivative(sigmoid_layers[layer + 1]) * np.dot(delta_error[layer + 1],
+                                                                                         self.weights['3'].T)
+        # partial_derivative_weights[layer] = np.dot(sigmoid_layers[layer].T, delta_error[layer])
+        partial_derivative_weights[layer] = np.dot(sigmoid_layers[layer].T, delta_error[layer])
+        partial_derivative_bias[layer] = np.mean(delta_error[layer], axis=0)
 
         return partial_derivative_weights, partial_derivative_bias
 
     def sigmoid(self, z):
+        z = np.clip(z, -500, 500)
         return np.divide(1.0, (1.0 + np.exp(-z)))
 
     def sigmoid_derivative(self, y):
-        # y = self.sigmoid(z)
         return np.multiply(y, 1.0 - y)
 
-    def cross_entropy(self, data):
-        cost = 0.0
-        for image, label in data:
-            y = self.feedforward(image)
-            # print(y)
-            cost += np.sum(label * np.log(y + 0.00001) + (1.0 - label) * np.log(1.0 - y + 0.00001))
+    def cross_entropy(self):
+        eps = 0.00001
+        y = self.feedforward(self.images)
+        cost = np.sum(np.multiply(self.digit_array, np.log(y + eps)))
+        # return -np.divide(1.0, len(self.images)) * cost
+        print(len(self.images))
+        return -1.0 / len(self.images) * cost
 
-        return -np.divide(1.0, len(data)) * cost
-
-    def accuracy(self, data):
-        accuracy = 0.0
-        for image, label in data:
-            output = np.argmax(self.feedforward(image))
-            label = np.argmax(label)
-            if output == label:
-                accuracy += 1
+    def accuracy(self, data, labels):
+        output = np.argmax(self.feedforward(data), 1)
+        accuracy = np.count_nonzero((output - labels) == 0)
         return accuracy / len(data) * 100
 
-    def feedforward(self, image):
-        y = image
-        for w, b in zip(self.weights.values(), self.biases.values()):
-            y = self.sigmoid(np.dot(w.T, y) + b)
+    def feedforward(self, data):
+        y = data
+        for l in self.weights:
+            z = np.dot(y, self.weights[l]) + self.biases[l]
+            if l == '2':
+                y = self.sigmoid(z)
+            if l == '3':
+                y = self.softmax(z, 1)
         return y
 
-
-def digit_array(digit):
-    nums = np.zeros(10)
-    nums[digit] = 1
-    return nums
+    def softmax(self, z, axis=0):
+        return np.divide(np.exp(z).T, np.sum(np.exp(z), axis=axis)).T
 
 
 if __name__ == '__main__':
@@ -134,6 +141,5 @@ if __name__ == '__main__':
 
     train_set, valid_set, test_set = pickle.load(f, encoding='bytes')
     f.close()
-    training_data = [(train_set[0][i], digit_array(train_set[1][i])) for i in range(len(train_set[0]))]
-    network = Network(training_data, 0.1, 20, 1000, [len(train_set[0][0]), 100, 10])
+    network = Network(train_set[0], train_set[1], 0.1, 100, 10, [len(train_set[0][0]), 100, 10])
     network.train()
