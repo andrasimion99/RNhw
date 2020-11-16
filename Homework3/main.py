@@ -5,10 +5,14 @@ import random
 
 
 class Network:
-    def __init__(self, images, labels, learning_rate, iterations, mini_batch_size, layer_sizes, valid_set, test_set):
+    def __init__(self, images, labels, learning_rate, regularization, momentum, iterations, mini_batch_size,
+                 layer_sizes,
+                 valid_set, test_set):
         self.images = images
         self.labels = labels
         self.learning_rate = learning_rate
+        self.regularization = regularization
+        self.momentum = momentum
         self.iterations = iterations
         self.mini_batch_size = mini_batch_size
         # layer_sizes contains all layer sizes [input, hidden, output]
@@ -18,6 +22,8 @@ class Network:
         self.digit_array = self.digit_array_initialisation()
         self.valid_set = valid_set
         self.test_set = test_set
+        self.velocity_weights = self.velocity_weights_initialisation()
+        self.velocity_biases = self.velocity_biases_initialisation()
 
     def weights_initialisation(self):
         return {'2': np.random.normal(size=(self.layer_sizes[0], self.layer_sizes[1]), loc=0.0,
@@ -25,9 +31,17 @@ class Network:
                 '3': np.random.normal(size=(self.layer_sizes[1], self.layer_sizes[2]), loc=0.0,
                                       scale=1.0 / self.layer_sizes[1])}
 
+    def velocity_weights_initialisation(self):
+        return {'2': np.zeros((self.layer_sizes[0], self.layer_sizes[1])),
+                '3': np.zeros((self.layer_sizes[1], self.layer_sizes[2]))}
+
     def bias_initialisation(self):
         return {'2': np.random.normal(size=self.layer_sizes[1], scale=1.0, loc=0.0),
                 '3': np.random.normal(size=self.layer_sizes[2], scale=1.0, loc=0.0)}
+
+    def velocity_biases_initialisation(self):
+        return {'2': np.zeros(self.layer_sizes[1]),
+                '3': np.zeros(self.layer_sizes[2])}
 
     def digit_array_initialisation(self):
         digit_labels = np.zeros([len(self.images), 10])
@@ -54,19 +68,33 @@ class Network:
         model = dict()
         model["accuracy"] = best_accuracy
         model["iteration"] = index
+        reg_lr = ( self.learning_rate * (self.regularization / n))
+        lr = self.learning_rate / self.mini_batch_size
         while self.iterations > index:
             print(f"Iteratii ramase: {self.iterations - index}")
+
             random.shuffle(index_list)
             nr_mini_batches = n // self.mini_batch_size
-            lr = self.learning_rate / self.mini_batch_size
 
             for i in range(1, nr_mini_batches + 1):
                 mini_samples, mini_labels = self.get_mini_data(i, index_list)
                 gradient_weights, gradient_bias = self.backpropagation(mini_samples, mini_labels)
-                self.weights['2'] -= lr * gradient_weights[0]
-                self.weights['3'] -= lr * gradient_weights[1]
-                self.biases['2'] -= lr * gradient_bias[0]
-                self.biases['3'] -= lr * gradient_bias[1]
+                self.velocity_weights['2'] = reg_lr * self.weights['2'] + lr * gradient_weights[0] + self.momentum * \
+                                             self.velocity_weights['2']
+                self.weights['2'] -= self.velocity_weights['2']
+                self.velocity_weights['3'] = reg_lr * self.weights['3'] + lr * gradient_weights[1] + self.momentum * \
+                                             self.velocity_weights['3']
+                self.weights['3'] -= self.velocity_weights['3']
+                # self.weights['3'] = reg_lr * self.weights['3'] - lr * gradient_weights[1] + self.momentum * \
+                #                     self.weights['3']
+                # self.biases['2'] = reg_lr * self.biases['2'] - lr * gradient_bias[0]
+                # self.biases['3'] = reg_lr * self.biases['3'] - lr * gradient_bias[1]
+                self.velocity_biases['2'] = reg_lr * self.biases['2'] + lr * gradient_bias[0] + self.momentum * \
+                                            self.velocity_biases['2']
+                self.biases['2'] -= self.velocity_biases['2']
+                self.velocity_biases['3'] = reg_lr * self.biases['3'] + lr * gradient_bias[1] + self.momentum * \
+                                            self.velocity_biases['3']
+                self.biases['3'] -= self.velocity_biases['3']
             print(f"Eroarea la antrenare: {self.cross_entropy()}")
 
             accuracy = self.validation(self.valid_set)
@@ -127,7 +155,8 @@ class Network:
         eps = 0.00001
         y = self.feedforward(self.images)
         cost = np.sum(np.multiply(self.digit_array, np.log(y + eps)))
-        return -1.0 / len(self.images) * cost
+        return -1.0 / len(self.images) * cost + 0.5 * self.regularization / len(self.images) * sum(
+            np.linalg.norm(w) ** 2 for w in self.weights)
 
     def accuracy(self, data, labels):
         output = np.argmax(self.feedforward(data), 1)
@@ -174,6 +203,7 @@ if __name__ == '__main__':
 
     train_set, valid_set, test_set = pickle.load(f, encoding='bytes')
     f.close()
-    network = Network(train_set[0], train_set[1], 0.1, 100, 10, [len(train_set[0][0]), 100, 10], valid_set, train_set)
+    network = Network(train_set[0], train_set[1], 0.1, 0.1, 0.9, 100, 10, [len(train_set[0][0]), 100, 10], valid_set,
+                      train_set)
     best_weights, best_bias = network.train()
     network.test_data(best_weights, best_bias)
